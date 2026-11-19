@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { blockers, nextStep, parseProgress } from "../src/state.js";
+import { blockers, friendlyError, nextStep, parseProgress } from "../src/state.js";
 
 const ready = {
   spotifyPath: "C:\\Spotify",
@@ -47,4 +47,19 @@ test("only real installer stage markers advance the progress UI", () => {
   ]) {
     assert.equal(parseProgress(line), null);
   }
+});
+
+test("raw download errors become readable messages, actionable errors stay intact", () => {
+  assert.equal(
+    friendlyError("curl.exe failed (exit code: 28). Could not resolve host"),
+    "The download failed. Check your internet connection and try again.",
+  );
+  assert.equal(
+    friendlyError("tar.exe failed (exit code: 1). bad zip"),
+    "Could not extract the downloaded files. Try again.",
+  );
+  assert.equal(
+    friendlyError("Quit Spotify, including its system tray icon, then try again."),
+    "Quit Spotify, including its system tray icon, then try again.",
+  );
 });

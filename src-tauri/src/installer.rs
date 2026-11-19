@@ -73,21 +73,45 @@ fn spotify_running() -> io::Result<bool> {
     }
 }
 
+fn store_package(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("SpotifyAB.SpotifyMusic_"))
+}
+
+fn spotify_paths(roaming: &Path, local: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![roaming.join("Spotify"), local.join("Spotify")];
+    for name in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Ok(root) = directory(name) {
+            paths.push(root.join("Spotify"));
+            // Store builds live in a versioned package folder, one level under WindowsApps.
+            if let Ok(entries) = fs::read_dir(root.join("WindowsApps")) {
+                paths.extend(
+                    entries
+                        .filter_map(Result::ok)
+                        .map(|entry| entry.path())
+                        .filter(|path| store_package(path)),
+                );
+            }
+        }
+    }
+    paths
+}
+
 fn system() -> Result<System, String> {
     let roaming = directory("APPDATA")?;
     let local = directory("LOCALAPPDATA")?;
-    let spotify = [
-        roaming.join("Spotify"),
-        local.join("Spotify"),
-        directory("ProgramFiles")?.join("Spotify"),
-    ]
-    .into_iter()
-    .find(|path| path.join("Spotify.exe").is_file() && path.join("Apps").is_dir());
+    let spotify = spotify_paths(&roaming, &local)
+        .into_iter()
+        .find(|path| path.join("Spotify.exe").is_file() && path.join("Apps").is_dir());
     let cli = [
-        local.join("spicetify"),
-        directory("USERPROFILE")?.join("spicetify-cli"),
+        Some(local.join("spicetify")),
+        directory("USERPROFILE")
+            .ok()
+            .map(|path| path.join("spicetify-cli")),
     ]
     .into_iter()
+    .flatten()
     .chain(env::split_paths(&env::var_os("PATH").unwrap_or_default()))
     .filter(|path| path.is_absolute())
     .map(|path| path.join("spicetify.exe"))
@@ -490,5 +514,34 @@ mod tests {
         metadata["assets"][0]["browser_download_url"] =
             json!("https://github.com.evil.test/marketplace.zip");
         assert!(asset(&metadata, "marketplace", "marketplace.zip").is_err());
+    }
+
+    #[test]
+    fn finds_store_spotify_packages_without_matching_unrelated_folders() {
+        assert!(store_package(Path::new(
+            r"C:\Program Files\WindowsApps\SpotifyAB.SpotifyMusic_1.250.0.0_x64__zpdnekdrzrea0"
+        )));
+        assert!(!store_package(Path::new(
+            r"C:\Program Files\WindowsApps\SpotifyAB.SpotifyMusic"
+        )));
+        assert!(!store_package(Path::new(r"C:\Spotify")));
+    }
+
+    #[test]
+    fn copies_nested_files_into_the_destination() {
+        let source = tempfile::tempdir().unwrap();
+        let destination = tempfile::tempdir().unwrap();
+        fs::create_dir(source.path().join("nested")).unwrap();
+        fs::write(source.path().join("root.txt"), b"root").unwrap();
+        fs::write(source.path().join("nested/child.txt"), b"child").unwrap();
+        copy_tree(source.path(), &destination.path().join("out")).unwrap();
+        assert_eq!(
+            fs::read_to_string(destination.path().join("out/root.txt")).unwrap(),
+            "root"
+        );
+        assert_eq!(
+            fs::read_to_string(destination.path().join("out/nested/child.txt")).unwrap(),
+            "child"
+        );
     }
 }

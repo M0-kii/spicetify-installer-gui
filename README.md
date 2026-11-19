@@ -10,7 +10,7 @@ A very small and simple Windows app to install **Spicetify** for non-tech people
 
 The app pulls the CLI and Marketplace from their official GitHub releases, checks the downloads, and backs up Spotify before applying Spicetify. If Spicetify is already installed, the app uses that copy.
 
-Wanna undo it? See [Spicetify’s uninstall guide](https://spicetify.app/docs/advanced-usage/uninstallation).
+Wanna undo it? See [Spicetify’s uninstall guide](https://spicetify.app/docs/advanced-usage/uninstallation). That guide won’t mention this installer: it also adds `%LOCALAPPDATA%\spicetify` to your user PATH, which you can remove there for a full cleanup.
 
 ## If you wanna Build it
 

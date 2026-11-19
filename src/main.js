@@ -1,7 +1,7 @@
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { blockers, nextStep, parseProgress } from "./state.js";
+import { blockers, friendlyError, nextStep, parseProgress } from "./state.js";
 import "./style.css";
 
 const $ = (id) => document.getElementById(id);
@@ -100,7 +100,7 @@ async function inspect() {
     $("spotify-status").textContent = "Unavailable";
     $("spotify-status").className = "status";
     $("cli-status").textContent = "Unavailable";
-    notice(String(error), "error");
+    notice(friendlyError(error), "error");
   } finally {
     checking = false;
     controls();
@@ -113,6 +113,8 @@ async function install() {
   failed = false;
   logs = [];
   $("log").textContent = "Starting installation…";
+  $("recovery").hidden = true;
+  $("copy-restore").textContent = "Copy command";
   $("log-details").open = false;
   $("progress").value = 0;
   $("progress-title").textContent = "Checking your system…";
@@ -135,7 +137,8 @@ async function install() {
   } catch (error) {
     failed = true;
     log(String(error));
-    notice(String(error), "error");
+    notice(friendlyError(error), "error");
+    $("recovery").hidden = false;
     $("install-heading").textContent = "Installation stopped";
     $("log-details").open = true;
   } finally {
@@ -163,6 +166,21 @@ $("minimize").addEventListener("click", async () => {
 });
 $("close").addEventListener("click", closeWindow);
 $("refresh").addEventListener("click", inspect);
+$("copy-restore").addEventListener("click", async () => {
+  const command = $("restore-command").textContent;
+  try {
+    await navigator.clipboard.writeText(command);
+    $("copy-restore").textContent = "Copied";
+  } catch {
+    // Clipboard access can be denied; selecting the text still lets Ctrl+C work.
+    const range = document.createRange();
+    range.selectNodeContents($("restore-command"));
+    const selection = getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    $("copy-restore").textContent = "Press Ctrl+C";
+  }
+});
 $("back").addEventListener("click", () => {
   if (installing || checking) return;
   if (step === 3) closeWindow();

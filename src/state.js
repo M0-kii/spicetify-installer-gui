@@ -31,3 +31,12 @@ export function nextStep(step, system, busy) {
   if (step === 1) return 2;
   return step;
 }
+
+export function friendlyError(error) {
+  const text = String(error);
+  if (/curl\.exe failed|Could not start curl\.exe/i.test(text))
+    return "The download failed. Check your internet connection and try again.";
+  if (/tar\.exe failed|Could not start tar\.exe/i.test(text))
+    return "Could not extract the downloaded files. Try again.";
+  return text;
+}

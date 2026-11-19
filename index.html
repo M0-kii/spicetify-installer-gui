@@ -61,6 +61,10 @@
             <div class="progress-heading"><strong id="progress-title" role="status">Getting ready…</strong><span id="progress-count">1 / 4</span></div>
             <progress id="progress" max="4" value="0" aria-label="Installation progress"></progress>
           </div>
+          <p id="recovery" class="recovery" hidden>
+            Spotify files may have changed. Run <code id="restore-command">spicetify restore</code> in a terminal, then try again.
+            <button id="copy-restore" class="row-button" type="button">Copy command</button>
+          </p>
         </section>
         <section id="done-screen" aria-labelledby="done-title" hidden>
           <div class="screen-heading"><h1 id="done-title" tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg> Installation complete</h1></div>
