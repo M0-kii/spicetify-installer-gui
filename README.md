@@ -1,6 +1,6 @@
 # Spicetify Installer
 
-A small Windows app that sets up Spicetify without opening a terminal. Marketplace is one checkbox away.
+A very small and simple Windows app to install **Spicetify** for non-tech people :D
 
 ## Getting started
 
@@ -10,9 +10,9 @@ A small Windows app that sets up Spicetify without opening a terminal. Marketpla
 
 The app pulls the CLI and Marketplace from their official GitHub releases, checks the downloads, and backs up Spotify before applying Spicetify. If Spicetify is already installed, the app uses that copy.
 
-Need to undo it? See [Spicetify’s uninstall guide](https://spicetify.app/docs/advanced-usage/uninstallation).
+Wanna undo it? See [Spicetify’s uninstall guide](https://spicetify.app/docs/advanced-usage/uninstallation).
 
-## Build it
+## If you wanna Build it
 
 You’ll need pnpm, Node.js 22.12+, Rust, and the [Tauri Windows setup](https://v2.tauri.app/start/prerequisites/).
 
