@@ -15,7 +15,7 @@
         "label": "main",
         "title": "Spicetify Installer",
         "width": 460,
-        "height": 310,
+        "height": 340,
         "resizable": false,
         "maximizable": false,
         "decorations": false,
@@ -29,7 +29,7 @@
     }
   },
   "bundle": {
-    "active": true,
+    "active": false,
     "targets": ["nsis"],
     "shortDescription": "Install Spicetify and its Marketplace on Windows",
     "category": "Utility",

@@ -25,10 +25,33 @@ async fn install_spicetify(
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
     {
-        return Err("An installation is already running.".into());
+        return Err("An operation is already running.".into());
     }
     let result = tauri::async_runtime::spawn_blocking(move || {
         installer::install(marketplace, |line| {
+            let _ = on_event.send(line.to_owned());
+        })
+    })
+    .await
+    .map_err(|e| e.to_string());
+    state.store(false, Ordering::SeqCst);
+    result?
+}
+
+#[tauri::command]
+async fn uninstall_spicetify(
+    marketplace: bool,
+    on_event: Channel<String>,
+    state: State<'_, Arc<AtomicBool>>,
+) -> Result<(), String> {
+    if state
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Err("An operation is already running.".into());
+    }
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        installer::uninstall(marketplace, |line| {
             let _ = on_event.send(line.to_owned());
         })
     })
@@ -52,6 +75,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             inspect_system,
             install_spicetify,
+            uninstall_spicetify,
             open_spotify
         ])
         .on_window_event(|window, event| {

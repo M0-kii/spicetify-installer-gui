@@ -306,6 +306,21 @@ fn copy_tree(source: &Path, destination: &Path) -> io::Result<()> {
     Ok(())
 }
 
+fn notify_environment_change() {
+    let environment: Vec<u16> = "Environment\0".encode_utf16().collect();
+    unsafe {
+        SendMessageTimeoutW(
+            HWND_BROADCAST,
+            WM_SETTINGCHANGE,
+            0,
+            environment.as_ptr() as isize,
+            SMTO_ABORTIFHUNG,
+            1000,
+            std::ptr::null_mut(),
+        );
+    }
+}
+
 fn add_to_path(folder: &Path) -> io::Result<()> {
     let (key, _) = RegKey::predef(HKEY_CURRENT_USER)
         .create_subkey_with_flags("Environment", KEY_READ | KEY_WRITE)?;
@@ -330,19 +345,46 @@ fn add_to_path(folder: &Path) -> io::Result<()> {
         updated.vtype = previous.vtype;
     }
     key.set_raw_value("Path", &updated)?;
-    let environment: Vec<u16> = "Environment\0".encode_utf16().collect();
-    unsafe {
-        SendMessageTimeoutW(
-            HWND_BROADCAST,
-            WM_SETTINGCHANGE,
-            0,
-            environment.as_ptr() as isize,
-            SMTO_ABORTIFHUNG,
-            1000,
-            std::ptr::null_mut(),
-        );
-    }
+    notify_environment_change();
     Ok(())
+}
+
+fn without_path_entry(value: &str, folder: &str) -> String {
+    value
+        .split(';')
+        .filter(|path| !path.trim_end_matches('\\').eq_ignore_ascii_case(folder))
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+fn remove_from_path(folder: &Path) -> io::Result<()> {
+    let key = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey_with_flags("Environment", KEY_READ | KEY_WRITE)?;
+    let value = match key.get_value::<String, _>("Path") {
+        Ok(path) => path,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let folder = folder.to_string_lossy();
+    let trimmed = without_path_entry(&value, &folder);
+    if trimmed == value {
+        return Ok(());
+    }
+    let mut updated = trimmed.to_reg_value();
+    if let Ok(previous) = key.get_raw_value("Path") {
+        updated.vtype = previous.vtype;
+    }
+    key.set_raw_value("Path", &updated)?;
+    notify_environment_change();
+    Ok(())
+}
+
+fn remove_dir_if_exists(path: &Path) -> io::Result<()> {
+    match fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 pub fn install(marketplace: bool, log: impl Fn(&str)) -> Result<(), String> {
@@ -467,6 +509,57 @@ pub fn install(marketplace: bool, log: impl Fn(&str)) -> Result<(), String> {
     Ok(())
 }
 
+pub fn uninstall(marketplace: bool, log: impl Fn(&str)) -> Result<(), String> {
+    let status = system()?;
+    if status.admin {
+        return Err("Open this app without administrator privileges.".into());
+    }
+    if status.running {
+        return Err("Quit Spotify, including its system tray icon, then try again.".into());
+    }
+    let cli = status.cli.clone().ok_or("Spicetify CLI could not be found.")?;
+    let local_cli = directory("LOCALAPPDATA")?.join("spicetify");
+    let config = directory("APPDATA")?.join("spicetify");
+
+    let spice = |args: &[&str]| {
+        let mut cmd = Command::new(&cli);
+        cmd.creation_flags(0x08000000)
+            .stdin(Stdio::null())
+            .args(args);
+        run(&mut cmd)
+    };
+
+    log("[step:1] Restoring Spotify");
+    log(&spice(&["restore"])?);
+
+    log("[step:2] Removing Marketplace");
+    if marketplace {
+        let userdata = PathBuf::from(spice(&["path", "userdata"])?);
+        if !userdata.is_absolute() || !userdata.is_dir() {
+            return Err("Spicetify returned an invalid configuration folder.".into());
+        }
+        remove_dir_if_exists(&userdata.join("CustomApps").join("marketplace"))
+            .map_err(|e| format!("Could not remove Marketplace: {e}"))?;
+    }
+
+    log("[step:3] Removing CLI and PATH entry");
+    // Only delete the CLI we manage; a CLI the user installed elsewhere is left alone.
+    let managed = cli == local_cli.join("spicetify.exe");
+    if managed {
+        remove_dir_if_exists(&local_cli)
+            .map_err(|e| format!("Could not remove the CLI files: {e}"))?;
+    }
+    remove_from_path(&local_cli).map_err(|e| format!("Could not update the user PATH: {e}"))?;
+    remove_dir_if_exists(&config)
+        .map_err(|e| format!("Could not remove Spicetify settings: {e}"))?;
+
+    log("[step:4] Verifying");
+    if managed && cli.is_file() {
+        return Err("The CLI files could not be removed.".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,6 +618,28 @@ mod tests {
             r"C:\Program Files\WindowsApps\SpotifyAB.SpotifyMusic"
         )));
         assert!(!store_package(Path::new(r"C:\Spotify")));
+    }
+
+    #[test]
+    fn removes_only_the_managed_path_entry() {
+        assert_eq!(
+            without_path_entry(
+                r"C:\Tools;C:\Users\Me\AppData\Local\spicetify;D:\Bin",
+                r"C:\Users\Me\AppData\Local\spicetify"
+            ),
+            r"C:\Tools;D:\Bin"
+        );
+        assert_eq!(
+            without_path_entry(
+                r"C:\Tools;C:\Users\Me\AppData\Local\spicetify\",
+                r"c:\users\me\appdata\local\spicetify"
+            ),
+            "C:\\Tools"
+        );
+        assert_eq!(
+            without_path_entry(r"C:\Tools;D:\Bin", r"C:\Other"),
+            r"C:\Tools;D:\Bin"
+        );
     }
 
     #[test]

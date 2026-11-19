@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { blockers, friendlyError, nextStep, parseProgress } from "../src/state.js";
+import { blockers, friendlyError, nextStep, parseProgress, uninstallBlockers } from "../src/state.js";
 
 const ready = {
   spotifyPath: "C:\\Spotify",
@@ -31,6 +31,17 @@ test("wizard requires ready checks, keeps busy screens in place, and cannot skip
   assert.equal(nextStep(1, ready, false), 2);
   assert.equal(nextStep(2, ready, false), 2);
   assert.equal(nextStep(3, ready, false), 3);
+});
+
+test("uninstall needs the CLI and closed Spotify, not a signed-in client", () => {
+  const installed = { ...ready, cliPath: "C:\\spicetify.exe" };
+  assert.deepEqual(uninstallBlockers(installed), []);
+  assert.equal(uninstallBlockers(undefined).length, 1);
+  assert.equal(uninstallBlockers({ ...ready, cliPath: null }).length, 1);
+  assert.equal(uninstallBlockers({ ...installed, spotifyRunning: true }).length, 1);
+  assert.equal(uninstallBlockers({ ...installed, admin: true }).length, 1);
+  assert.equal(nextStep(0, installed, false, uninstallBlockers), 1);
+  assert.equal(nextStep(0, { ...installed, cliPath: null }, false, uninstallBlockers), 0);
 });
 
 test("only real installer stage markers advance the progress UI", () => {

@@ -1,17 +1,46 @@
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { blockers, friendlyError, nextStep, parseProgress } from "./state.js";
+import {
+  blockers,
+  friendlyError,
+  nextStep,
+  parseProgress,
+  uninstallBlockers,
+} from "./state.js";
 import "./style.css";
 
 const $ = (id) => document.getElementById(id);
 const screens = ["check", "options", "install", "done"];
+let mode = "install";
 let system;
 let step = 0;
 let checking = false;
 let installing = false;
 let failed = false;
 let logs = [];
+
+const removing = () => mode === "uninstall";
+const activeBlockers = () => (removing() ? uninstallBlockers : blockers)(system);
+
+function applyMode() {
+  const uninstall = removing();
+  $("mode-install").setAttribute("aria-pressed", String(!uninstall));
+  $("mode-uninstall").setAttribute("aria-pressed", String(uninstall));
+  $("options-heading-text").textContent = uninstall
+    ? "Uninstall options"
+    : "Installation options";
+  $("marketplace-title").textContent = uninstall ? "Remove Marketplace" : "Marketplace";
+  $("marketplace-subtitle").textContent = uninstall
+    ? "Delete Marketplace files from Spotify"
+    : "Browse themes and extensions in Spotify";
+  $("mode-note").textContent = uninstall
+    ? "Spotify is restored first, then the CLI, settings, PATH entry and Marketplace are removed."
+    : "Spotify is backed up before changes are applied.";
+  $("done-heading-text").textContent = uninstall
+    ? "Uninstall complete"
+    : "Installation complete";
+}
 
 function notice(message, kind = "") {
   $("notice").textContent = message;
@@ -21,18 +50,22 @@ function notice(message, kind = "") {
 
 function controls() {
   $("refresh").disabled = checking;
+  $("mode-install").disabled = checking || installing;
+  $("mode-uninstall").disabled = checking || installing;
   $("marketplace").disabled = installing;
   $("close").disabled = installing;
-  $("close").title = installing ? "Wait for installation to finish" : "Close";
+  $("close").title = installing
+    ? `Wait for ${removing() ? "uninstallation" : "installation"} to finish`
+    : "Close";
   $("back").disabled = checking || installing || step === 0;
   $("back").textContent = step === 3 ? "Close" : "Back";
   $("next").disabled =
-    step === 0 ? checking || blockers(system).length > 0 : installing;
+    step === 0 ? checking || activeBlockers().length > 0 : installing;
   $("next").textContent = [
     checking ? "Checking…" : "Next",
-    "Install",
-    failed ? "Try again" : "Installing…",
-    "Open Spotify",
+    removing() ? "Uninstall" : "Install",
+    failed ? "Try again" : removing() ? "Uninstalling…" : "Installing…",
+    removing() ? "Close" : "Open Spotify",
   ][step];
   $("step-count").textContent = `Step ${step + 1} of 4`;
 }
@@ -71,7 +104,7 @@ async function inspect() {
   try {
     if (!isTauri())
       throw new Error(
-        "Browser preview. Open the desktop app to check your system and install Spicetify.",
+        "Browser preview. Open the desktop app to check your system and manage Spicetify.",
       );
     system = await invoke("inspect_system");
     const ready = Boolean(
@@ -88,11 +121,19 @@ async function inspect() {
           ? "Quit Spotify"
           : "Ready";
     $("spotify-status").className = `status ${ready ? "good" : "bad"}`;
-    $("cli-status").textContent = system.cliPath ? "Installed" : "Will install";
-    $("cli-option-detail").textContent = system.cliPath
-      ? "Use your existing installation"
-      : "The latest official release";
-    notice(blockers(system).join(" "), "error");
+    $("cli-status").textContent = system.cliPath
+      ? "Installed"
+      : removing()
+        ? "Not found"
+        : "Will install";
+    $("cli-option-detail").textContent = removing()
+      ? system.cliPath
+        ? "The CLI that will be removed"
+        : "Nothing to remove"
+      : system.cliPath
+        ? "Use your existing installation"
+        : "The latest official release";
+    notice(activeBlockers().join(" "), "error");
   } catch (error) {
     system = undefined;
     $("spotify-detail").textContent = "System check failed";
@@ -107,39 +148,46 @@ async function inspect() {
   }
 }
 
-async function install() {
+async function run() {
   if (installing) return;
+  const uninstall = removing();
   installing = true;
   failed = false;
   logs = [];
-  $("log").textContent = "Starting installation…";
+  $("log").textContent = uninstall ? "Starting uninstall…" : "Starting installation…";
   $("recovery").hidden = true;
   $("copy-restore").textContent = "Copy command";
   $("log-details").open = false;
   $("progress").value = 0;
   $("progress-title").textContent = "Checking your system…";
   $("progress-count").textContent = "1 / 4";
-  $("install-heading").textContent = "Installing Spicetify";
+  $("install-heading").textContent = uninstall
+    ? "Uninstalling Spicetify"
+    : "Installing Spicetify";
   notice("");
   showStep(2);
   const onEvent = new Channel();
   onEvent.onmessage = log;
   try {
-    await invoke("install_spicetify", {
+    await invoke(uninstall ? "uninstall_spicetify" : "install_spicetify", {
       marketplace: $("marketplace").checked,
       onEvent,
     });
     $("progress").value = 4;
-    $("done-description").textContent = $("marketplace").checked
-      ? "Find Marketplace in the Spotify sidebar."
-      : "Open Spotify to get started.";
+    $("done-description").textContent = uninstall
+      ? "Spotify has been restored to its original state."
+      : $("marketplace").checked
+        ? "Find Marketplace in the Spotify sidebar."
+        : "Open Spotify to get started.";
     showStep(3);
   } catch (error) {
     failed = true;
     log(String(error));
     notice(friendlyError(error), "error");
-    $("recovery").hidden = false;
-    $("install-heading").textContent = "Installation stopped";
+    $("recovery").hidden = uninstall;
+    $("install-heading").textContent = uninstall
+      ? "Uninstall stopped"
+      : "Installation stopped";
     $("log-details").open = true;
   } finally {
     installing = false;
@@ -164,6 +212,17 @@ $("minimize").addEventListener("click", async () => {
     notice(`Could not minimize the window: ${error}`, "error");
   }
 });
+for (const [id, value] of [
+  ["mode-install", "install"],
+  ["mode-uninstall", "uninstall"],
+])
+  $(id).addEventListener("click", () => {
+    if (mode === value || checking || installing) return;
+    mode = value;
+    applyMode();
+    showStep(0);
+    inspect();
+  });
 $("close").addEventListener("click", closeWindow);
 $("refresh").addEventListener("click", inspect);
 $("copy-restore").addEventListener("click", async () => {
@@ -193,15 +252,16 @@ $("back").addEventListener("click", () => {
 $("next").addEventListener("click", async () => {
   if (checking || installing) return;
   if (step === 3) {
+    if (removing()) return closeWindow();
     try {
       await invoke("open_spotify");
     } catch (error) {
       notice(String(error), "error");
     }
-  } else if (step === 2 && failed) await install();
+  } else if (step === 2 && failed) await run();
   else {
-    const next = nextStep(step, system, false);
-    if (next === 2) await install();
+    const next = nextStep(step, system, false, activeBlockers);
+    if (next === 2) await run();
     else if (next !== step) showStep(next);
   }
 });
@@ -218,4 +278,5 @@ document.querySelectorAll('a[target="_blank"]').forEach((link) => {
   });
 });
 
+applyMode();
 inspect();
